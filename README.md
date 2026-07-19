@@ -1,45 +1,65 @@
 # Weather Chat MCP
 
-A simple MCP-based weather assistant that can answer USA weather questions via a tool-backed API and Israeli weather questions via browser automation on `https://www.weather2day.co.il/forecast`.
+עוזר צ'אט למזג אוויר, מבוסס על **MCP (Model Context Protocol)** ומודל **Gemini**. המערכת מריצה שני שרתי MCP נפרדים — אחד למזג אוויר בארה"ב (דרך ה-API הרשמי של ה-NWS) ואחד לישראל (דרך אוטומציית דפדפן על אתר `weather2day.co.il`) — ומאפשרת למודל השפה להחליט מתי ואיזה כלי לקרוא כדי לענות על שאלת המשתמש.
 
-## מה הפרויקט עושה
+## מטרת הפרויקט
 
-- מריץ מערכת MCP עם שני כלי Python:
-  - `weather_USA.py` – כלי מזג אוויר ל־USA שניגש ל־API רשמי
-  - `weather_Israel.py` – כלי מזג אוויר לישראל שמפעיל דפדפן באמצעות Playwright כדי לחפש עיר ולקרוא תחזית
-- המארח (`host.py`) משלב את שני הכלים ומאפשר למודל Gemini לקרוא להם דרך כלי חיצוני
-- התקשורת נעשית דרך STDIO בין ה־host ל־MCP servers
+- להדגים ארכיטקטורת **host + multiple MCP servers**: `host.py` מתחבר לשני שרתי MCP דרך STDIO, אוסף מהם את רשימת הכלים הזמינים, ומעביר אותה למודל Gemini.
+- Gemini בוחר האם לענות ישירות או לבקש קריאה לכלי (בפורמט JSON), ה-host מריץ את הכלי ומחזיר את התוצאה חזרה למודל עד שמתקבלת תשובה סופית.
+- שני "עולמות" של מזג אוויר מיוצגים על ידי שני שרתים נפרדים:
+  - `weather_USA.py` — ניגש ל-API הרשמי של שירות מזג האוויר האמריקאי (NWS).
+  - `weather_Israel.py` — מפעיל דפדפן אמיתי (Playwright) ומבצע חיפוש עיר באתר תחזית ישראלי.
+
+## ארכיטקטורה
+
+```
+host.py  (Gemini + לולאת שיחה)
+   │
+   ├── client.py → MCPClient  ──STDIO──► weather_USA.py     (שרת MCP - USA)
+   │
+   └── client.py → MCPClient  ──STDIO──► weather_Israel.py  (שרת MCP - ישראל)
+```
+
+## כלים זמינים (Tools)
+
+| שרת | כלי | תיאור |
+|---|---|---|
+| `weather_USA` | `get_alerts_in_USA(state)` | התראות מזג אוויר פעילות למדינה אמריקאית לפי קוד דו-אותיות (למשל `CA`, `NY`) |
+| `weather_USA` | `get_forecast_in_USA(latitude, longitude)` | תחזית ל-5 התקופות הקרובות לפי קואורדינטות |
+| `weather_Israel` | `open_weather_forecast_israel()` | פתיחת אתר התחזית הישראלי בדפדפן |
+| `weather_Israel` | `enter_weather_forecast_city_israel(city)` | הקלדת שם עיר בשדה החיפוש באתר |
+| `weather_Israel` | `select_weather_forecast_city_israel()` | בחירת הצעת ההשלמה האוטומטית הראשונה עבור העיר |
+| `weather_Israel` | `read_weather_forecast_content_israel()` | קריאת התוכן הטקסטואלי הגלוי בעמוד התחזית הנוכחי, כדי שהמודל יוכל לענות ישירות לפי תוכן העמוד |
+
+> לב לב: הכלים לישראל מבצעים אוטומציית דפדפן שלב-אחר-שלב (פתיחה → הקלדת עיר → בחירה → קריאת תוכן) — Gemini קורא להם ברצף הנכון כדי להגיע לעמוד התחזית של העיר המבוקשת ולחלץ ממנו את התשובה בפועל.
 
 ## דרישות
 
-- Python 3.13+ (הפרויקט מוגדר ב־`pyproject.toml`)
-- תלותיות:
-  - `google-genai`
-  - `mcp`
-  - `python-dotenv`
-  - `playwright`
-  - `openai`
-  - `netfree-unstrict-ssl`
+- Python 3.13+
+- מנהל חבילות [`uv`](https://docs.astral.sh/uv/) (קיים `uv.lock` בפרויקט) — או `pip` באופן ידני
+- מפתח API תקף ל-Gemini
 
 ## התקנה
 
-1. צרו וירטואלenv ותקינו תלותיות:
+עם `uv` (מומלץ, ישתמש ב-`uv.lock` הקיים):
+
+```powershell
+uv sync
+uv run playwright install
+```
+
+או עם `pip`:
 
 ```powershell
 python -m venv .venv
 .\.venv\Scripts\activate
-pip install -r requirements.txt
+pip install google-genai mcp python-dotenv playwright openai netfree-unstrict-ssl
+python -m playwright install
 ```
 
-> אם אין לכם `requirements.txt`, ניתן להתקין את התלויות ישירות מ־`pyproject.toml` או ליצור את הקובץ בעצמכם.
+### הגדרת משתני סביבה
 
-2. התקינו Playwright בדפדפן:
-
-```powershell
-.\.venv\Scripts\python.exe -m playwright install
-```
-
-3. הגדרתם את משתני הסביבה ב־`.env`:
+צרו קובץ `.env` בשורש הפרויקט (הקובץ מוחרג מ-git ב-`.gitignore`):
 
 ```env
 GEMINI_API_KEY=your_api_key_here
@@ -48,36 +68,44 @@ GEMINI_MODEL=gemini-2.5-flash
 
 ## איך להריץ
 
-ב־PowerShell:
+```powershell
+uv run host.py
+```
+
+או אם השתמשתם ב-`venv` רגיל:
 
 ```powershell
 .\.venv\Scripts\python.exe host.py
 ```
 
-אם ברצונכם להריץ את כל כלי ה־MCP מתוך `weather_Israel.py` או `weather_USA.py` ישירות, ודאו שיש את `__main__` שלהם או שמפעילים אותם דרך `host.py`.
+לאחר ההרצה, `host.py` מתחבר אוטומטית לשני שרתי ה-MCP ופותח שיחה אינטראקטיבית בטרמינל. הקלידו שאלה בשורת `Query:`, או `quit` ליציאה.
 
-## שימוש
+## דוגמאות לשאלות שה-Agent יודע לענות עליהן
 
-לאחר הרצת `host.py`, תתבקשו להזין שאילתה.
+**מזג אוויר בארה"ב:**
+- `What are the active weather alerts in California?`
+- `Are there any severe weather warnings in NY right now?`
+- `What is the weather forecast for San Francisco for the next few days?`
+- `Give me the forecast for New York City.`
 
-דוגמאות לשאלות:
+**מזג אוויר בישראל (אוטומציית דפדפן):**
+- `מה מזג האוויר בתל אביב היום?`
+- `תן לי תחזית לירושלים ותגיד לי אם צפוי גשם מחר`
+- `Open the Israel weather site and tell me the forecast for Haifa.`
 
-- `What is the weather in New York today?`
-- `תן תחזית לירושלים היום ונראה לי אם יש סופה מחר.`
-- `Open the Israel weather site and select Tel Aviv.`
-- `What is the current USA weather forecast for San Francisco?`
+> עבור שאלות ארה"ב, המודל עצמו מזהה את הקואורדינטות של העיר ומעביר אותן לכלי `get_forecast_in_USA`. עבור שאלות ישראל, הדפדפן נפתח בפועל (`headless=False`) כך שניתן לצפות בתהליך החיפוש בזמן אמת.
 
 ## הערות מיוחדות
 
-- השימוש במודל Gemini יכול לדרוש חשבון ו־API key תקין.
-- אם תקבלו שגיאת `429 RESOURCE_EXHAUSTED`, זה אומר שגמרתם קווטת בקשות במודל הנבחר.
-- קובץ זה נועד להסביר את מטרת הפרויקט, את אופן ההפעלה, ואת הפקודות הנפוצות.
+- כתובת ה-API הרשמית של NWS תומכת רק במיקומים בתוך ארה"ב.
+- אם תקבלו שגיאת `429 RESOURCE_EXHAUSTED` ממודל Gemini — סימן שמכסת הבקשות למודל הנבחר נגמרה.
+- דפדפן Playwright לישראל נפתח בחלון גלוי (לא headless) כדי לאפשר מעקב אחר תהליך החיפוש; חלון הדפדפן נשאר פתוח בין קריאות עוקבות עד לסיום התהליך.
 
 ## מבנה קבצים ראשי
 
-- `host.py` – מארח ה־MCP שמנהל את כל הכלים והבקשות
-- `client.py` – חיבור ל־MCP server דרך STDIO
-- `weather_USA.py` – כלי מזג אוויר ל־USA
-- `weather_Israel.py` – כלי מזג אוויר לישראל עם Playwright
-- `.env` – הגדרות סביבה ל־Gemini API
-- `pyproject.toml` – התלויות והגדרות הפרויקט
+- `host.py` — ה-host שמריץ את לולאת השיחה עם Gemini ומתאם בין שני שרתי ה-MCP
+- `client.py` — מחלקת `MCPClient` לחיבור STDIO אל שרת MCP בודד
+- `weather_USA.py` — שרת MCP למזג אוויר בארה"ב
+- `weather_Israel.py` — שרת MCP למזג אוויר בישראל, מבוסס Playwright
+- `.env` — משתני סביבה (לא נשמר ב-git)
+- `pyproject.toml` / `uv.lock` — הגדרות התלויות של הפרויקט
