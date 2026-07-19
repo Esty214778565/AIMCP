@@ -15,6 +15,12 @@ def _media_state() -> str:
     return "open" if _browser and _page else "closed"
 
 
+def _clean_page_text(text: str) -> str:
+    """Collapse a raw page-text dump into non-empty, whitespace-trimmed lines."""
+    lines = [line.strip() for line in text.splitlines()]
+    return "\n".join(line for line in lines if line)
+
+
 async def _ensure_page() -> object:
     global _playwright, _browser, _page
 
@@ -90,6 +96,23 @@ async def select_weather_forecast_city_israel() -> str:
         return f"Selected the first suggested city. Current page title: {title}. URL: {page.url}"
     except PlaywrightTimeout:
         return "Timeout while selecting the first city suggestion."
+
+
+@mcp.tool()
+async def read_weather_forecast_content_israel() -> str:
+    """Read and return the cleaned, visible text content of the currently open
+    Israeli weather forecast page, so the model can answer the user's question
+    directly from the page content instead of only navigating it."""
+    page = await _ensure_page()
+    try:
+        await page.wait_for_load_state('networkidle', timeout=20000)
+        raw_text = await page.inner_text('body')
+        cleaned = _clean_page_text(raw_text)
+        if not cleaned:
+            return "No readable content was found on the page."
+        return cleaned
+    except PlaywrightTimeout:
+        return "Timeout while reading the weather forecast page content."
 
 
 def main():
